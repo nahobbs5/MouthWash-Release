@@ -123,7 +123,7 @@ The built-in list is organized into six categories you can turn on or off:
 |----------|--------|
 | **Sexual** | Sexual words, crude anatomy and slurs. |
 | **Profanity** | Everyday swearing and insults. |
-| **Slurs** | Racial, ethnic and homophobic slurs. |
+| **Slurs** | Racial, ethnic and miscellaneous slurs. |
 | **Insults** | Name-calling and derogatory words about intelligence, disability or appearance. |
 | **Religious** | Religious names used as exclamations, e.g. "Jesus!" or "goddamn". |
 | **Mild** | Mild exclamations like jeez, gosh, darn and heck. |
