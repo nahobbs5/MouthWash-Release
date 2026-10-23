@@ -14,6 +14,9 @@ mutes, bleeps, or plays a sound effect over them. It all runs on your own PC.
 
 ### [⬇&nbsp; Download for Windows (.msi)](https://github.com/nahobbs5/MouthWash/releases/latest)
 
+or get the [**Python command-line script**](censor.py) for Windows, macOS or Linux
+([setup required](#command-line-version))
+
 </div>
 
 ---
