@@ -10,7 +10,7 @@ mutes, bleeps, or plays a sound effect over them. It all runs on your own PC.
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows)](#installation)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-B7410E?logo=rust)](#built-with)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/nahobbs5/MouthWash?label=release)](https://github.com/nahobbs5/MouthWash/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/nahobbs5/MouthWash-Release?include_prereleases&label=release)](https://github.com/nahobbs5/MouthWash-Release/releases)
 
 ### [⬇&nbsp; Download for Windows (.msi)](https://github.com/nahobbs5/MouthWash-Release/releases/latest)
 
