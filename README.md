@@ -426,3 +426,6 @@ MouthWash is released under the [MIT License](LICENSE).
 - **whisper.cpp** is MIT-licensed, by Georgi Gerganov and contributors.
   Whisper models are by OpenAI, distributed in ggml format from
   [ggerganov/whisper.cpp on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp).
+- **faster-whisper** (used only by the `censor.py` command-line script) is
+  MIT-licensed, by SYSTRAN. It isn't bundled with MouthWash; you install it
+  yourself with `pip`, and it downloads its own Whisper models.
