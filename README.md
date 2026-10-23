@@ -12,7 +12,7 @@ mutes, bleeps, or plays a sound effect over them. It all runs on your own PC.
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/nahobbs5/MouthWash?label=release)](https://github.com/nahobbs5/MouthWash/releases/latest)
 
-### [⬇&nbsp; Download for Windows (.msi)](https://github.com/nahobbs5/MouthWash/releases/latest)
+### [⬇&nbsp; Download for Windows (.msi)](https://github.com/nahobbs5/MouthWash-Release/releases/latest)
 
 or get the [**Python command-line script**](censor.py) for Windows, macOS or Linux
 ([setup required](#command-line-version))
