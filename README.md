@@ -315,6 +315,84 @@ The real report shows the full words.
   over music or mishear a similar-sounding one. Check the report, and use
   **Extra words** or **skips** to fine-tune.
 
+## Command-line version
+
+[`censor.py`](censor.py) is the original Python script that MouthWash grew out
+of. It uses the same pipeline (FFmpeg → Whisper → word match → FFmpeg) but
+transcribes with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+instead of whisper.cpp. **It is usually faster than the app, but it has fewer
+options.** It also runs on macOS and Linux, not just Windows.
+
+### App vs. script
+
+| | MouthWash app | `censor.py` |
+|---|---|---|
+| **Speed** | Good | **Faster** (faster-whisper) |
+| **Platforms** | Windows 10/11 | **Windows, macOS, Linux** |
+| **Setup** | One `.msi`; FFmpeg included | Python, faster-whisper and FFmpeg installed yourself |
+| **Interface** | Drag-and-drop window with live progress | Terminal, one file or folder per command |
+| **Folders** | Searches all subfolders | Top-level folder only |
+| **File types** | Video and audio | Video only (`mkv` `mp4` `m4v` `avi` `mov`) |
+| **Output** | `.mkv` for video; audio keeps its format | Always `.mkv` |
+| **Word list** | Six categories, presets, check a word, skip words, extra words | One plain-text `words.txt` you edit by hand (the sample has about 30 entries) |
+| **Replacement sound** | Mute, bleep, 7 built-in sounds, random mix, your own file, preview | Mute, bleep, or your own file (`--sound`) |
+| **Models** | Download or import in the app | Downloaded automatically on first run |
+| **Cancel / retry** | Buttons per batch | `Ctrl+C`, then run again |
+| **Transcript cache and report** | ✅ | ✅ (same `.words.json` / `.censor.txt` files) |
+| **Dry run, overwrite, re-transcribe** | ✅ | ✅ (`--dry-run`, `--force`, `--retranscribe`) |
+| **Padding, model, device** | ✅ | ✅ (`--pad`, `--model`, `--device`) |
+| **Language** | English | Any Whisper language (`--language`) |
+
+### What you need
+
+The script on its own isn't enough. You also need:
+
+1. **Python 3** and the faster-whisper package:
+   ```
+   pip install faster-whisper
+   ```
+2. **FFmpeg**: `ffmpeg` and `ffprobe` must be on your `PATH`. The script stops
+   right away if they're missing.
+3. **A word list.** The script looks for `words.txt` in the same folder as
+   `censor.py`. Copy [`Resources/words.txt`](Resources/words.txt) there, or
+   point to it with `--wordlist`. Use one word per line; a trailing `*`
+   matches any word that starts with it, and lines starting with `#` are
+   ignored.
+4. **Internet on the first run.** faster-whisper downloads the Whisper model
+   the first time (`medium.en` is about 1.5 GB) and reuses it after that.
+
+**Optional:** for an NVIDIA GPU, also run
+`pip install nvidia-cublas-cu12 nvidia-cudnn-cu12`. Without it, the script uses
+the CPU, which is slower. For `--sound`, bring your own audio file, for example
+[`Resources/duck.wav`](Resources/duck.wav).
+
+### Usage
+
+```
+python censor.py "Movie.mkv"                       # mute (default)
+python censor.py "D:\Movies\Season 1" --bleep      # every video in a folder, bleeped
+python censor.py "Movie.mkv" --sound duck.wav      # play a sound over each word
+python censor.py "Movie.mkv" --dry-run             # transcribe and report only
+python censor.py "Movie.mkv" --model large-v3 --pad 0.2
+```
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `--wordlist FILE` | `words.txt` next to the script | Word list to use. |
+| `--model NAME` | `medium.en` | Whisper model (`small.en`, `medium.en`, `large-v3`…). |
+| `--device` | `auto` | `auto`, `cpu` or `cuda`. Auto tries the GPU, then the CPU. |
+| `--language` | `en` | Spoken language. |
+| `--pad SECONDS` | `0.15` | Extra time muted on each side of a word. |
+| `--bleep` | off | 1 kHz tone instead of silence. |
+| `--sound FILE` | — | Play this audio file over each censored word. |
+| `--sound-volume X` | `1.0` | Volume multiplier for `--sound`. |
+| `--out-dir DIR` | next to the source | Where to write the output files. |
+| `--dry-run` | off | Write the report only, with no censored copy. |
+| `--force` | off | Overwrite an existing `(clean)` file. |
+| `--retranscribe` | off | Ignore the cached transcript. |
+
+Run `python censor.py --help` to see the full list.
+
 ## Built with
 
 | Component | Role |
