@@ -5,7 +5,8 @@ censor.py - mute or bleep chosen words in movies you own.
 Pipeline:
   1. ffmpeg extracts mono 16 kHz audio (center channel if the track is 5.1+)
   2. faster-whisper transcribes with word-level timestamps (cached to JSON)
-  3. words are matched against words.txt and padded into time spans
+  3. words are matched against words.toml (same categories as the MouthWash app)
+     and padded into time spans
   4. ffmpeg re-muxes: video/subs copied untouched, first audio track muted/bleeped
 
 Usage:
@@ -14,6 +15,11 @@ Usage:
   python censor.py "Film.mkv" --sound duck.wav   # play your own sound instead
   python censor.py "Film.mkv" --dry-run          # transcribe + report only
   python censor.py "Film.mkv" --model large-v3 --pad 0.2
+  python censor.py "Film.mkv" --sexual-only      # presets: --sexual-only,
+                                                 #   --sexual-profanity (default), --everything
+  python censor.py "Film.mkv" --categories sexual,slurs,mild --add frack* --skip hell
+  python censor.py --check "goddamn" --everything
+  python censor.py --list-categories
 
 Requires: ffmpeg + ffprobe on PATH, `pip install faster-whisper`
 """
@@ -65,29 +71,132 @@ def extract_audio(src, wav, channels):
     run(cmd)
 
 
-def load_wordlist(path):
-    """One entry per line. '#' comments. Trailing * = prefix match."""
-    exact, prefixes = set(), []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        line = line.strip().lower()
-        if not line or line.startswith("#"):
-            continue
-        if line.endswith("*"):
-            prefixes.append(line[:-1])
-        else:
-            exact.add(line)
-    return exact, tuple(prefixes)
+# Same categories and presets as the MouthWash app (crates/mouthwash-core/src/categories.rs).
+CATEGORIES = {
+    "sexual": "Sexual words, crude anatomy and slurs.",
+    "profanity": "Everyday swearing and insults.",
+    "slurs": "Racial, ethnic and homophobic slurs.",
+    "insults": "Name-calling and derogatory words about intelligence, disability or appearance.",
+    "religious": "Religious names used as exclamations, e.g. \"Jesus!\" or \"goddamn\".",
+    "mild": "Mild exclamations like jeez, gosh, darn and heck.",
+}
+PRESETS = {  # slurs are part of every preset
+    "sexual_only": ["sexual", "slurs"],
+    "sexual_profanity": ["sexual", "profanity", "slurs"],
+    "everything": list(CATEGORIES),
+}
+DEFAULT_CATEGORIES = PRESETS["sexual_profanity"]
+
+
+def default_wordlist():
+    here = Path(__file__).resolve().parent
+    for p in (here / "words.toml",
+              here / "crates" / "mouthwash-app" / "assets" / "words.toml",
+              here / "words.txt"):
+        if p.is_file():
+            return p
+    return here / "words.toml"
+
+
+def load_categories(path):
+    """Return {category: [entries]}. A .toml file has a [categories] table like the
+    app's words.toml; any other file is a plain list, one entry per line ('#' comments)."""
+    path = Path(path)
+    if path.suffix.lower() != ".toml":
+        return {None: path.read_text(encoding="utf-8").splitlines()}
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            sys.exit("reading words.toml needs Python 3.11+ (or `pip install tomli`)")
+    with open(path, "rb") as f:
+        cats = tomllib.load(f).get("categories", {})
+    return {c: list(cats.get(c, [])) for c in CATEGORIES}
+
+
+def parse_entry(entry):
+    """('exact'|'prefix'|'suffix'|'contains', core) or None for blanks/comments.
+    word = exact, word* = starts with, *word = ends with, *word* = anywhere inside."""
+    e = entry.strip().lower()
+    if not e or e.startswith("#"):
+        return None
+    lead, trail = e.startswith("*"), len(e) > 1 and e.endswith("*")
+    core = e.strip("*")
+    if not core:
+        return None
+    kind = {(True, True): "contains", (True, False): "suffix",
+            (False, True): "prefix", (False, False): "exact"}[(lead, trail)]
+    return kind, core
+
+
+def build_wordlist(entries):
+    wl = {"exact": set(), "prefix": [], "suffix": [], "contains": []}
+    for e in entries:
+        p = parse_entry(e)
+        if p:
+            kind, core = p
+            if kind == "exact":
+                wl["exact"].add(core)
+            else:
+                wl[kind].append(core)
+    return wl
+
+
+def active_entries(cats, enabled, add, skip):
+    """Union of enabled categories plus --add words, minus --skip entries."""
+    skipped = {s.strip().lower() for s in skip}
+    lines = []
+    for c, entries in cats.items():
+        if c is None or c in enabled:
+            lines += entries
+    lines += add
+    return [e for e in lines if e.strip().lower() not in skipped]
 
 
 def norm(word):
     return re.sub(r"[^a-z']", "", word.lower()).strip("'")
 
 
-def is_hit(word, exact, prefixes):
+def candidates(w):
+    """The word, plus the word without a possessive 's ("god's" -> "god")."""
+    out = [w]
+    if w.endswith("'s") and len(w) > 2:
+        out.append(w[:-2])
+    return out
+
+
+def is_masked(word):
+    """Whisper masked it with asterisks ("f***", "s**t"): always censored.
+    "*sigh*" is a stage direction, not a masked word."""
+    word = word.strip()
+    return not word.startswith("*") and re.search(r"[^\W\d_]\*", word) is not None
+
+
+def entry_matches(entry, normalized):
+    p = parse_entry(entry)
+    if not p or not normalized:
+        return False
+    kind, core = p
+    test = {"exact": lambda w: w == core, "prefix": lambda w: w.startswith(core),
+            "suffix": lambda w: w.endswith(core), "contains": lambda w: core in w}[kind]
+    return any(test(w) for w in candidates(normalized))
+
+
+def is_hit(word, wl):
+    if not (wl["exact"] or wl["prefix"] or wl["suffix"] or wl["contains"]):
+        return False
+    if is_masked(word):
+        return True
     w = norm(word)
     if not w:
         return False
-    return w in exact or (prefixes and w.startswith(prefixes))
+    return any(c in wl["exact"]
+               or any(c.startswith(p) for p in wl["prefix"])
+               or any(c.endswith(p) for p in wl["suffix"])
+               or any(p in c for p in wl["contains"])
+               for c in candidates(w))
 
 
 def add_nvidia_dll_dirs():
@@ -149,10 +258,10 @@ def transcribe(wav, model_name, language, requested="auto"):
             raise
 
 
-def build_spans(words, exact, prefixes, pad, duration_guard=2.0):
+def build_spans(words, wl, pad, duration_guard=2.0):
     spans = []
     for w in words:
-        if is_hit(w["word"], exact, prefixes):
+        if is_hit(w["word"], wl):
             start = max(0.0, w["start"] - pad)
             end = w["end"] + pad
             # guard against Whisper stretching a word across a long silence
@@ -336,7 +445,7 @@ def apply_filter(src, dst, spans, sample_rate, layout, bleep, sound, sound_vol):
 
 
 # ---------------------------------------------------------------- main flow
-def process(src, args, exact, prefixes):
+def process(src, args, wl):
     print(f"\n== {src.name}")
     out_dir = Path(args.out_dir) if args.out_dir else src.parent
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -362,7 +471,7 @@ def process(src, args, exact, prefixes):
             words = transcribe(wav, args.model, args.language, args.device)
         cache.write_text(json.dumps(words), encoding="utf-8")
 
-    spans = build_spans(words, exact, prefixes, args.pad)
+    spans = build_spans(words, wl, args.pad)
     write_report(report, spans)
     print(f"  {len(spans)} spans flagged -> {report.name}")
 
@@ -378,11 +487,70 @@ def process(src, args, exact, prefixes):
     print(f"  done -> {dst}")
 
 
+def parse_categories(text):
+    cats = [c.strip().lower() for c in text.split(",") if c.strip()]
+    bad = [c for c in cats if c not in CATEGORIES]
+    if bad:
+        raise argparse.ArgumentTypeError(
+            f"unknown category {', '.join(bad)} (choose from {', '.join(CATEGORIES)})")
+    return cats
+
+
+def check_word(word, cats, enabled, add, skip):
+    """Say which entries catch a word and whether it's censored with these flags."""
+    n = norm(word)
+    skipped = {s.strip().lower() for s in skip}
+    hits = [(c, e) for c, entries in cats.items() for e in entries if entry_matches(e, n)]
+    hits += [("extra (--add)", e) for e in add if entry_matches(e, n)]
+    for c, e in hits:
+        if e.strip().lower() in skipped:
+            state = "skipped (--skip)"
+        elif c is None or c == "extra (--add)" or c in enabled:
+            state = "on"
+        else:
+            state = "off with these flags"
+        print(f"  {e!r} in {c or 'word list'}: {state}")
+    if is_masked(word):
+        print("  masked by whisper (has *): always censored")
+    wl = build_wordlist(active_entries(cats, enabled, add, skip))
+    if not hits and not is_masked(word):
+        print("  not in the word list")
+    print(f"{word!r} -> {'CENSORED' if is_hit(word, wl) else 'not censored'}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("path", help="movie file or folder of movies")
-    ap.add_argument("--wordlist", default=str(Path(__file__).with_name("words.txt")))
+    ap.add_argument("path", nargs="?", help="movie file or folder of movies")
+
+    words = ap.add_argument_group(
+        "words to filter",
+        "Pick a preset or your own categories (default: Sexual + Profanity + Slurs). "
+        f"Categories: {', '.join(CATEGORIES)}.")
+    pick = words.add_mutually_exclusive_group()
+    pick.add_argument("--sexual-only", dest="categories", action="store_const",
+                      const=PRESETS["sexual_only"], help="preset: sexual words and slurs")
+    pick.add_argument("--sexual-profanity", dest="categories", action="store_const",
+                      const=PRESETS["sexual_profanity"],
+                      help="preset: sexual words, slurs and everyday swearing (default)")
+    pick.add_argument("--everything", dest="categories", action="store_const",
+                      const=PRESETS["everything"],
+                      help="preset: every category, incl. insults, religious and mild")
+    pick.add_argument("--categories", type=parse_categories, metavar="LIST",
+                      help="comma-separated categories, e.g. sexual,slurs,mild")
+    words.add_argument("--add", action="append", default=[], metavar="WORD",
+                       help="extra word to always censor (repeatable; word*, *word, *word* allowed)")
+    words.add_argument("--skip", action="append", default=[], metavar="ENTRY",
+                       help="stop censoring this list entry, written as listed, e.g. hell or damn* "
+                            "(repeatable)")
+    words.add_argument("--check", metavar="WORD",
+                       help="show whether a word is censored with these flags, then exit")
+    words.add_argument("--list-categories", action="store_true",
+                       help="show each category and its word count, then exit")
+    words.add_argument("--wordlist", default=str(default_wordlist()),
+                       help="words.toml (categories) or a plain .txt list "
+                            "(default: words.toml next to the script)")
+
     ap.add_argument("--model", default="medium.en",
                     help="whisper model (small.en, medium.en, large-v3...)")
     ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto",
@@ -398,6 +566,27 @@ def main():
     ap.add_argument("--retranscribe", action="store_true", help="ignore cached transcript")
     args = ap.parse_args()
 
+    if not Path(args.wordlist).is_file():
+        sys.exit(f"word list not found: {args.wordlist} "
+                 "(put words.toml next to censor.py or use --wordlist)")
+    cats = load_categories(args.wordlist)
+    plain = None in cats
+    enabled = args.categories or DEFAULT_CATEGORIES
+
+    if args.list_categories:
+        if plain:
+            sys.exit(f"{args.wordlist} is a plain list with no categories")
+        for c, desc in CATEGORIES.items():
+            mark = "*" if c in enabled else " "
+            print(f" {mark} {c:<10} {len(cats[c]):>4} words  {desc}")
+        print("\n * = on with these flags")
+        return
+    if args.check:
+        check_word(args.check, cats, enabled, args.add, args.skip)
+        return
+    if not args.path:
+        ap.error("give a movie file or folder (or use --check / --list-categories)")
+
     for tool in ("ffmpeg", "ffprobe"):
         if not shutil.which(tool):
             sys.exit(f"{tool} not found on PATH")
@@ -405,7 +594,18 @@ def main():
     if args.sound and not Path(args.sound).is_file():
         sys.exit(f"sound file not found: {args.sound}")
 
-    exact, prefixes = load_wordlist(args.wordlist)
+    if plain:
+        if args.categories:
+            print(f"note: {Path(args.wordlist).name} has no categories, so the preset is ignored")
+        print(f"filtering: every word in {Path(args.wordlist).name}")
+    else:
+        print("filtering: " + ", ".join(c.capitalize() for c in CATEGORIES if c in enabled))
+    if args.add:
+        print("  plus: " + ", ".join(args.add))
+    if args.skip:
+        print("  skipping: " + ", ".join(args.skip))
+    wl = build_wordlist(active_entries(cats, enabled, args.add, args.skip))
+
     p = Path(args.path)
     if p.is_dir():
         files = sorted(f for f in p.iterdir()
@@ -417,7 +617,7 @@ def main():
 
     for f in files:
         try:
-            process(f, args, exact, prefixes)
+            process(f, args, wl)
         except subprocess.CalledProcessError as e:
             print(f"  FAILED: {Path(str(e.cmd[0])).name} exited with code {e.returncode} "
                   f"(see the message above)")
