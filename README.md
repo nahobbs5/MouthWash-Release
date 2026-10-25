@@ -32,7 +32,6 @@ or get the [**Python command-line script**](censor.py) for Windows, macOS or Lin
 - [Output files](#output-files)
 - [Tips for best results](#tips-for-best-results)
 - [Built with](#built-with)
-- [Building from source](#building-from-source)
 - [Responsible use](#responsible-use)
 - [License and credits](#license-and-credits)
 
@@ -337,7 +336,7 @@ options.** It also runs on macOS and Linux, not just Windows.
 | **Folders** | Searches all subfolders | Top-level folder only |
 | **File types** | Video and audio | Video only (`mkv` `mp4` `m4v` `avi` `mov`) |
 | **Output** | `.mkv` for video; audio keeps its format | Always `.mkv` |
-| **Word list** | Six categories, presets, check a word, skip words, extra words | One plain-text `words.txt` you edit by hand (the sample has about 30 entries) |
+| **Word list** | Six categories, presets, check a word, skip words, extra words | Same six categories and presets as flags (`--sexual-only`, `--everything`…), plus `--check`, `--skip`, `--add` |
 | **Replacement sound** | Mute, bleep, 7 built-in sounds, random mix, your own file, preview | Mute, bleep, or your own file (`--sound`) |
 | **Models** | Download or import in the app | Downloaded automatically on first run |
 | **Cancel / retry** | Buttons per batch | `Ctrl+C`, then run again |
@@ -356,11 +355,14 @@ The script on its own isn't enough. You also need:
    ```
 2. **FFmpeg**: `ffmpeg` and `ffprobe` must be on your `PATH`. The script stops
    right away if they're missing.
-3. **A word list.** The script looks for `words.txt` in the same folder as
-   `censor.py`. Copy [`Resources/words.txt`](Resources/words.txt) there, or
-   point to it with `--wordlist`. Use one word per line; a trailing `*`
-   matches any word that starts with it, and lines starting with `#` are
-   ignored.
+3. **The word list.** The script looks for `words.toml` in the same folder as
+   `censor.py` (in a full checkout it also finds the app's copy automatically).
+   Download [`words.toml`](crates/mouthwash-app/assets/words.toml) and put it
+   next to the script, or point to it with `--wordlist`. It's the same list,
+   split into the same six categories, that the app uses. A plain `.txt` list
+   (one word per line, like [`Resources/words.txt`](Resources/words.txt)) still
+   works, but has no categories, so presets don't apply to it. Reading
+   `words.toml` needs Python 3.11 or newer (or `pip install tomli`).
 4. **Internet on the first run.** faster-whisper downloads the Whisper model
    the first time (`medium.en` is about 1.5 GB) and reuses it after that.
 
@@ -377,11 +379,34 @@ python censor.py "D:\Movies\Season 1" --bleep      # every video in a folder, bl
 python censor.py "Movie.mkv" --sound duck.wav      # play a sound over each word
 python censor.py "Movie.mkv" --dry-run             # transcribe and report only
 python censor.py "Movie.mkv" --model large-v3 --pad 0.2
+python censor.py "Movie.mkv" --everything          # every category, like the app's "Everything" preset
+python censor.py "Movie.mkv" --categories sexual,slurs,mild --add "frack*" --skip hell
+python censor.py --check "goddamn" --sexual-only   # is this word censored with these flags?
+python censor.py --list-categories                 # categories and word counts
 ```
+
+#### Words to filter
+
+These match the app's **Words to filter** settings. Pick at most one preset or
+`--categories`; without one, the script uses **Sexual + Profanity** (sexual
+words, slurs and everyday swearing), the same as the app's default.
+
+| Option | What it does |
+|--------|--------------|
+| `--sexual-only` | Preset: sexual words and slurs. |
+| `--sexual-profanity` | Preset: sexual words, slurs and everyday swearing (default). |
+| `--everything` | Preset: all six categories, including insults, religious and mild exclamations. |
+| `--categories LIST` | Your own mix, comma-separated: `sexual`, `profanity`, `slurs`, `insults`, `religious`, `mild`. |
+| `--add WORD` | Extra word to always censor. Repeat for more. `word*`, `*word` and `*word*` work. |
+| `--skip ENTRY` | Stop censoring a listed entry, written as it appears in the list (e.g. `hell`, `damn*`). Repeat for more. |
+| `--check WORD` | Show which entry catches a word and whether it's censored with the other flags, then exit. |
+| `--list-categories` | Show each category and its word count, then exit. |
+
+#### Other options
 
 | Option | Default | What it does |
 |--------|---------|--------------|
-| `--wordlist FILE` | `words.txt` next to the script | Word list to use. |
+| `--wordlist FILE` | `words.toml` next to the script | Word list to use (`.toml` with categories, or a plain `.txt`). |
 | `--model NAME` | `medium.en` | Whisper model (`small.en`, `medium.en`, `large-v3`…). |
 | `--device` | `auto` | `auto`, `cpu` or `cuda`. Auto tries the GPU, then the CPU. |
 | `--language` | `en` | Spoken language. |
